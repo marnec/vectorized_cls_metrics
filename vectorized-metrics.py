@@ -7,9 +7,13 @@ def binary_clf_curve(y_true, y_score):
     y_true = (y_true == pos_label)
 
     # sort scores and corresponding truth values
-    desc_score_indices = np.argsort(y_score, kind="mergesort")[::-1]
+    # desc_score_indices = np.argsort(y_score, kind="mergesort")[::-1]
+    # desc_score_indices = np.unravel_index(np.argsort(y_score, axis=None, kind="mergesort")[::-1], y_score.shape)
+    desc_score_indices = np.argsort(y_score, axis=0, kind="mergesort")[::-1]
+    # print(desc_score_indices)
     y_score = y_score[desc_score_indices]
     y_true = y_true[desc_score_indices]
+
 
     # y_score typically has many tied values. Here we extract
     # the indices associated with the distinct values. We also
@@ -67,10 +71,23 @@ def confmat(fps, tps):
 
 if __name__ == "__main__":
     size = 1000000
+    nt = 10000
     t = np.greater_equal(np.random.rand(size), 0.5).astype(int)
+    tt = t.reshape(size // nt, nt)
+    # print(tt.shape)
     p = np.random.rand(size)
+    pt = np.random.rand(size // nt, nt)
 
-    fps, tps, thr = binary_clf_curve(t, p)
-    fpr, tpr, thr = roc(fps, tps, thr)
-    pre, rec, thr = pr(fps, tps, thr)
-    print(confmat(fps, tps).T.shape)
+    # for x, y in zip(tt, pt):
+    for i in range(size // nt):
+        x = tt[i]
+        y = pt[i]
+        fps, tps, thr = binary_clf_curve(x, y)
+    
+    # print(np.random.rand(2, 4))
+
+    # np.apply_along_axis(binary_clf_curve, 0, tt, pt)
+    # fpr, tpr, thr = roc(fps, tps, thr)
+    # pre, rec, thr = pr(fps, tps, thr)
+    # print(confmat(fps, tps).T.shape)
+    
