@@ -1,3 +1,24 @@
-.idea*
+.idea*[I 13:58:48.230 LabApp] Saving file at /CAID-vect.ipynb
+[I 14:00:48.322 LabApp] Saving file at /CAID-vect.ipynb
+[I 14:02:48.433 LabApp] Saving file at /CAID-vect.ipynb
+[I 14:03:31.663 LabApp] Starting buffering for d4b8270f-c3c5-4ec8-b10a-2c5be3c88328:a4826ab1-79a4-475d-829c-5697634a716f
+[I 14:03:31.970 LabApp] Kernel shutdown: d4b8270f-c3c5-4ec8-b10a-2c5be3c88328
+[W 14:12:21.896 LabApp] Build recommended
+[W 14:12:21.896 LabApp] @telamonian/theme-darcula needs to be included in build
+[I 14:12:23.721 LabApp] Building jupyterlab assets (build:dev)
+[I 14:12:42.691 LabApp] Starting buffering for 48235c41-7c5c-49f7-8a2f-ca6ca62f6b2c:fb09ffd8-c525-4c8d-b658-2d52ac975d2c
+[I 14:12:44.910 LabApp] Build is up to date
+[I 14:12:45.505 LabApp] Kernel started: 352752d5-fefa-4fe5-85b0-c9ae2dee92ef
+[I 14:13:30.500 LabApp] Starting buffering for 48235c41-7c5c-49f7-8a2f-ca6ca62f6b2c:62420f68-277a-4d6e-805e-3a51e6a0ad44
+[I 14:13:30.501 LabApp] Starting buffering for 352752d5-fefa-4fe5-85b0-c9ae2dee92ef:3bb9fd1d-b295-4b6e-9a09-5f2edc436608
+[I 14:13:32.239 LabApp] Build is up to date
+[I 14:19:33.430 LabApp] Saving file at /CAID-vect.ipynb
+[I 14:20:57.407 LabApp] Saving file at /CAID-vect.ipynb
+[I 14:22:57.513 LabApp] Saving file at /CAID-vect.ipynb
+[I 14:24:57.741 LabApp] Saving file at /CAID-vect.ipynb
+[I 14:26:57.847 LabApp] Saving file at /CAID-vect.ipynb
+[I 14:32:58.461 LabApp] Saving
+.venv
 data
 results
+__pycache__

@@ -1,26 +1,33 @@
+import logging
 import numpy as np
 import pandas as pd
 from pathlib import Path
 from parsers import parse_reference
-from vectorized_metrics import dataset_curves_and_metrics
 
-def baseline_random(ytrue, n=100, basename="", outpath='.'):
+# relative imports
+from logger import set_logger
+from vectorized_metrics import dataset_curves_and_metrics, target_curves_and_metrics
+
+
+def baseline_random(ref, n=100, basename="", target=True, outpath='.'):
     """Create an array of the given shape and populate it with random samples from a uniform distribution over [0, 1).
-    :param size:
-    :type size:
-    :param strategy:
-    :type strategy:
-    :param n:
-    :type n:
-    :return:
-    :rtype:
     """
+    logging.info("Calculating baseline random")
     outpath = Path(outpath)
     bsl_data = {}
+    tgt_data = {}
     thresholds = {}
+    ytrue = ref.values[:, 0]
+
     for i, yscore in enumerate(np.random.rand(n, len(ytrue)).round(3)):
         predname = "random{}".format(i)
         *_, metrics, smry_metrics = dataset_curves_and_metrics(ytrue, yscore, predname)
+
+        if target is True:  # very slow
+            aln_ref_pred = ref.assign(**{predname: yscore})  # **{} allows to dynamically assign column name
+            aln_ref_pred.columns.set_levels(list(ref.columns.get_level_values(1)) + ["scores"], level=1, inplace=True)
+            target_metrics = target_curves_and_metrics(aln_ref_pred, predname)
+            # target_metrics.to_csv(outpath / ".".join([basename, "random", predname, "target", "metrics", "csv"]))
 
         thresholds = {"default": yscore.flat[np.abs(yscore - 0.5).argmin()],
                       **metrics.idxmax(1).loc[predname].to_dict()}
@@ -29,21 +36,41 @@ def baseline_random(ytrue, n=100, basename="", outpath='.'):
             # store predictor performance in outer scope variable
             bsl_data.setdefault(m, []).append(metrics[thresholds[m]].unstack().assign(**smry_metrics,
                                                                                       thr=thresholds[m]))
+            if target is True:
+                # pd.concat is a workaround to prepend a level to the existing index, creating a MultiIndex
+                tgt_data.setdefault(m, []).append(pd.concat([target_metrics[thresholds[m]].unstack()],
+                                                            keys=[predname]).assign(thr=thresholds[m]))
+
     for m in thresholds:
         df = pd.concat(bsl_data[m])
         df.to_csv(outpath / ".".join([basename, "random", "all", "dataset", m, "metrics", "csv"]))
-        df.describe().to_csv(outpath / ".".join([basename, "random", "avg", "dataset", m, "metrics", "csv"]))
+        df.describe().round(3).to_csv(outpath / ".".join([basename, "random", "avg", "dataset", m, "metrics", "csv"]))
+
+        if target is True:
+            pd.concat(tgt_data[m]).to_csv(outpath / ".".join([basename, "random", "all", "target", m, "metrics", "csv"]))
+            df.describe().round(3).to_csv(
+                outpath / ".".join([basename, "random", "avg", "target", m, "metrics", "csv"]))
 
 
-def baseline_shuffle_dataset(ytrue, n=100, basename="", outpath="."):
+def baseline_shuffle_dataset(ref, n=100, basename="", target=True, outpath="."):
     outpath = Path(outpath)
     bsl_data = {}
+    tgt_data = {}
     thresholds = {}
+    ytrue = ref.values[:, 0]
+
+    logging.info("Calculating baseline shuffle-datasets")
+
     size = len(ytrue)
     for i, yscore in enumerate((np.random.choice(ytrue, replace=False, size=size) for _ in range(n))):
         predname = "shuffledataset{}".format(i)
         *_, metrics, smry_metrics = dataset_curves_and_metrics(ytrue, yscore, predname)
 
+        if target is True:  # very slow
+            aln_ref_pred = ref.assign(**{predname: yscore})  # **{} allows to dynamically assign column name
+            aln_ref_pred.columns.set_levels(list(ref.columns.get_level_values(1)) + ["scores"], level=1, inplace=True)
+            target_metrics = target_curves_and_metrics(aln_ref_pred, predname)
+
         thresholds = {"default": 1.0,
                       **metrics.idxmax(1).loc[predname].to_dict()}
 
@@ -51,24 +78,45 @@ def baseline_shuffle_dataset(ytrue, n=100, basename="", outpath="."):
             # store predictor performance in outer scope variable
             bsl_data.setdefault(m, []).append(metrics[thresholds[m]].unstack().assign(**smry_metrics,
                                                                                       thr=thresholds[m]))
+            if target is True:
+                # pd.concat is a workaround to prepend a level to the existing index, creating a MultiIndex
+                tgt_data.setdefault(m, []).append(pd.concat([target_metrics[thresholds[m]].unstack()],
+                                                            keys=[predname]).assign(thr=thresholds[m]))
+
     for m in thresholds:
         df = pd.concat(bsl_data[m])
         df.to_csv(outpath / ".".join([basename, "shuffledataset", "all", "dataset", m, "metrics", "csv"]))
         df.describe().round(3).to_csv(outpath / ".".join([basename, "shuffledataset", "avg", "dataset", m, "metrics", "csv"]))
 
+        if target is True:
+            pd.concat(tgt_data[m]).to_csv(outpath / ".".join([basename, "shuffledataset", "all", "target", m, "metrics", "csv"]))
+            df.describe().round(3).to_csv(
+                outpath / ".".join([basename, "shuffledataset", "avg", "target", m, "metrics", "csv"]))
 
-def baseline_shuffle_targets(ref, n=100, basename="", outpath="."):
+
+def baseline_shuffle_targets(ref, n=100, basename="", target=True, outpath="."):
     outpath = Path(outpath)
     ytrue = ref[("ref", "states")].values
     bsl_data = {}
+    tgt_data = {}
     thresholds = {}
+
+
+    logging.info("Calculating baseline shuffle-target")
+
     for i in range(n):
+        predname = "shuffletargets{}".format(i)
+
         yscore = []
-        for target, group in ref.groupby(level=0):
+        for _, group in ref.groupby(level=0):
             yscore.append(np.random.choice(group[("ref", "states")].values, replace=False, size=len(group)))
         yscore = np.concatenate(yscore)
 
-        predname = "shuffletargets{}".format(i)
+        if target is True:  # very slow
+            aln_ref_pred = ref.assign(**{predname: yscore})  # **{} allows to dynamically assign column name
+            aln_ref_pred.columns.set_levels(list(ref.columns.get_level_values(1)) + ["scores"], level=1, inplace=True)
+            target_metrics = target_curves_and_metrics(aln_ref_pred, predname)
+
         *_, metrics, smry_metrics = dataset_curves_and_metrics(ytrue, yscore, predname)
 
         thresholds = {"default": 1.0,
@@ -78,10 +126,21 @@ def baseline_shuffle_targets(ref, n=100, basename="", outpath="."):
             # store predictor performance in outer scope variable
             bsl_data.setdefault(m, []).append(metrics[thresholds[m]].unstack().assign(**smry_metrics,
                                                                                       thr=thresholds[m]))
+
+            if target is True:
+                # pd.concat is a workaround to prepend a level to the existing index, creating a MultiIndex
+                tgt_data.setdefault(m, []).append(pd.concat([target_metrics[thresholds[m]].unstack()],
+                                                            keys=[predname]).assign(thr=thresholds[m]))
+
     for m in thresholds:
         df = pd.concat(bsl_data[m])
         df.to_csv(outpath / ".".join([basename, "shuffletargets", "all", "dataset", m, "metrics", "csv"]))
         df.describe().round(3).to_csv(outpath / ".".join([basename, "shuffletargets", "avg", "dataset", m, "metrics", "csv"]))
+
+        if target is True:
+            pd.concat(tgt_data[m]).to_csv(outpath / ".".join([basename, "shuffletargets", "all", "target", m, "metrics", "csv"]))
+            df.describe().round(3).to_csv(
+                outpath / ".".join([basename, "shuffletargets", "avg", "target", m, "metrics", "csv"]))
 
 
 def get_reference(reference):
@@ -93,7 +152,8 @@ def get_reference(reference):
 
 
 if __name__ == "__main__":
+    set_logger("INFO")
     ref, refname = get_reference("tests/ref.test.txt")
-    baseline_random(ref.values[:, 0], basename=refname)
-    baseline_shuffle_dataset(ref.values[:, 0], basename=refname)
+    # baseline_random(ref, basename=refname)
+    # baseline_shuffle_dataset(ref, basename=refname)
     baseline_shuffle_targets(ref, basename=refname)

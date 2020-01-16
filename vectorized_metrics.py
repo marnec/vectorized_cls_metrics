@@ -1,13 +1,23 @@
 import logging
+import warnings
 import numpy as np
 import pandas as pd
 from scipy import stats
 from pathlib import Path
 from typing import Tuple, List, Union
 
+
 # relative imports
 from parsers import parse_reference, parse_prediction
 from logger import set_logger
+
+
+def ignore_numpy_warning(func):
+    def wrapper(*args):
+        with warnings.catch_warnings():
+            warnings.filterwarnings('ignore')
+            return func(*args)
+    return wrapper
 
 
 def binary_clf_curve(y_true: np.ndarray, y_score: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -97,6 +107,7 @@ def roc(fps: np.ndarray, tps: np.ndarray, thresholds: np.ndarray, drop_intermedi
     return np.array([fpr, tpr, thresholds], dtype=np.float64)
 
 
+@ignore_numpy_warning
 def pr(fps: np.ndarray, tps: np.ndarray, thresholds: np.ndarray) -> np.ndarray:
     precision = tps / (tps + fps)
     precision[np.isnan(precision)] = 0
@@ -309,10 +320,12 @@ def dataset_curves_and_metrics(ytrue, yscore, predname):
     return roc_df, pr_df, cmat, metrics, smry_metrics
 
 
-def bootstrap_curves_and_metrics(aln_refpred, predname):
+def bootstrap_curves_and_metrics(aln_refpred, predname, n):
     bootstrap_metrics = {}
+
+
     for i, data_bts in enumerate(bootstrap_reference_and_prediction(aln_refpred[('ref', 'states')].values,
-                                                                    aln_refpred[(predname, 'scores')].values)):
+                                                                    aln_refpred[(predname, 'scores')].values, n=n)):
         roc_bts, pr_bts, cmat_bts, metrics_bts = data_bts
 
         bts_d = {(i, m): dict(np.stack([roc_bts[2][1:], metrics_bts[m]], axis=1)) for m in metrics_bts}
@@ -375,7 +388,7 @@ def bvaluation(reference: str, predictions: list, outpath=".", dataset=True, tar
             cmats.append(cmat)
 
         if bootstrap is True:
-            bootstrap_metrics = bootstrap_curves_and_metrics(aln_ref_pred, predname)
+            bootstrap_metrics = bootstrap_curves_and_metrics(aln_ref_pred, predname, 1000)
             bootstrap_metrics.to_csv(outpath / ".".join([refname, run_tag, predname, "bootstrap", "metrics", "csv"]))
 
         if target is True:
@@ -416,7 +429,7 @@ def bvaluation(reference: str, predictions: list, outpath=".", dataset=True, tar
             pd.concat(bts_data[m]).to_csv(outpath / ".".join([refname, run_tag, "all", "bootstrap", m, "metrics", "csv"]))
 
     all_preds_aligned, excluded = align_reference_prediction(ref_obj, all_preds)
-    all_preds_aligned.to_csv(outpath / ".".join([refname, run_tag, "all", "dataset", "_", "predictions", "csv", "csv"]))
+    all_preds_aligned.to_csv(outpath / ".".join([refname, run_tag, "all", "dataset", "_", "predictions", "csv"]))
 
     if excluded:
         logging.warning("excuded targets: {}".format(", ".join(excluded)))
