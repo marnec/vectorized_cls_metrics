@@ -6,7 +6,6 @@ from scipy import stats
 from pathlib import Path
 from typing import Tuple, List, Union
 
-
 # relative imports
 from parsers import parse_reference, parse_prediction
 from logger import set_logger
@@ -104,7 +103,7 @@ def roc(fps: np.ndarray, tps: np.ndarray, thresholds: np.ndarray, drop_intermedi
     else:
         tpr = tps / tps[-1]
 
-    return np.array([fpr, tpr, thresholds], dtype=np.float64)
+    return np.array([fpr, tpr, thresholds], dtype=np.float64).round(3)
 
 
 @ignore_numpy_warning
@@ -226,12 +225,13 @@ def get_metrics(roc_curve, pr_curve, cmats: np.ndarray) -> dict:
         cmats = np.squeeze(np.split(cmats, 4, 0))
     tn, fp, fn, tp = cmats
 
-    # remove last element (is artificially added in pr func)
-    ppv = pr_curve[0][:-1]  # precision
-    tpr = pr_curve[1][:-1]  # sensitivity / recall
+    # remove first element (it's artificially added in pr func)
+    ppv = pr_curve[0][1:]  # precision
+    tpr = pr_curve[1][1:]  # sensitivity / recall
 
     # remove first element (they're calculated from an artificially added threshold in roc func)
     fpr = roc_curve[0][1:]  # fall-out
+    print(pr_curve[-1], roc_curve[-1])
     tnr = 1 - fpr  # specificity / selectivity
     fnr = 1 - tpr  # miss-rate
 
@@ -301,7 +301,7 @@ def dataset_curves_and_metrics(ytrue, yscore, predname):
                            index=pd.MultiIndex.from_product([[predname], metrics.keys()])).round(3)
 
     roc_df = pd.DataFrame(roc_curve[:-1].T,
-                          columns=pd.MultiIndex.from_product([[predname], [smry_metrics["aucroc"]], ["tpr", "fnr"]],
+                          columns=pd.MultiIndex.from_product([[predname], [smry_metrics["aucroc"]], ["fpr", "tpr"]],
                                                              names=["predictor", "auc", "metric"]),
                           index=roc_curve[-1].round(3))
 
@@ -322,7 +322,6 @@ def dataset_curves_and_metrics(ytrue, yscore, predname):
 
 def bootstrap_curves_and_metrics(aln_refpred, predname, n):
     bootstrap_metrics = {}
-
 
     for i, data_bts in enumerate(bootstrap_reference_and_prediction(aln_refpred[('ref', 'states')].values,
                                                                     aln_refpred[(predname, 'scores')].values, n=n)):
@@ -456,7 +455,7 @@ if __name__ == "__main__":
 
     allpreds = [Path("data/predictions/" + p) for p in allpreds]
 
-    # bvaluation("tests/ref.test.txt", ["tests/p1.test.txt", "tests/p2.test.txt"])
-    bvaluation("data/new-disprot-all_simple.txt", allpreds, "./results", dataset=True, target=True, bootstrap=True)
+    bvaluation("tests/ref.test.txt", ["tests/p1.test.txt", "tests/p2.test.txt"])
+    # bvaluation("data/new-disprot-all_simple.txt", allpreds, "./results", dataset=True, target=True, bootstrap=True)
     # bvaluation("data/new-disprot-all_simple.txt", ["data/predictions/D009_GlobPlot.out"])
 
