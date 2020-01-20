@@ -117,7 +117,7 @@ def pr(fps: np.ndarray, tps: np.ndarray, thresholds: np.ndarray) -> np.ndarray:
     # sl = slice(last_ind, None)
 
     # don't stop when full recall attained
-    return np.array([np.r_[1, precision], np.r_[0, recall], np.r_[thresholds[0] + 1, thresholds]], dtype=np.float64)
+    return np.array([np.r_[1, precision], np.r_[0, recall], np.r_[thresholds[0] + 1, thresholds]], dtype=np.float64).round(3)
 
 
 def confmat(fps: np.ndarray, tps: np.ndarray) -> np.ndarray:
@@ -307,7 +307,7 @@ def dataset_curves_and_metrics(ytrue, yscore, predname):
 
     pr_df = pd.DataFrame(pr_curve[:-1].T,
                          columns=pd.MultiIndex.from_product(
-                             [[predname], [smry_metrics["aucpr"]], [smry_metrics["aps"]], ["tpr", "ppv"]],
+                             [[predname], [smry_metrics["aucpr"]], [smry_metrics["aps"]], ["ppv", "tpr"]],
                              names=["predictor", "auc", "aps", "metric"]),
                          index=pr_curve[-1].round(3))
 
