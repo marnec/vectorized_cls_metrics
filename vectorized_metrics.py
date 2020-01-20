@@ -163,7 +163,7 @@ def align_reference_prediction(ref: dict, pred: dict, drop_missing: bool = True)
 
     if drop_missing is True:
         aln_pred = aln_pred.dropna(0)
-    # print(aln_pred)
+
     return aln_pred, wrong_len_preds
 
 
@@ -231,7 +231,6 @@ def get_metrics(roc_curve, pr_curve, cmats: np.ndarray) -> dict:
 
     # remove first element (they're calculated from an artificially added threshold in roc func)
     fpr = roc_curve[0][1:]  # fall-out
-    print(pr_curve[-1], roc_curve[-1])
     tnr = 1 - fpr  # specificity / selectivity
     fnr = 1 - tpr  # miss-rate
 
