@@ -7,7 +7,7 @@ verify_ssl = true
 
 [packages]
 numpy = "*"
-pandas = "*"
+pandas = "<1.0.0"
 scipy = "*"
 
 [requires]

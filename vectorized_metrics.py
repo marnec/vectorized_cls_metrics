@@ -36,6 +36,7 @@ def binary_clf_curve(y_true: np.ndarray, y_score: np.ndarray) -> Tuple[np.ndarra
         - thresholds: Decreasing unique score values
     :rtype: Tuple[np.ndarray, np.ndarray, np.ndarray]
     """
+    logging.debug("calculating binary clf curve")
     pos_label = 1.0
 
     # make y_true a boolean vector
@@ -81,7 +82,7 @@ def roc(fps: np.ndarray, tps: np.ndarray, thresholds: np.ndarray, drop_intermedi
 
     :rtype: np.ndarray, np.ndarray, np.ndarray
     """
-
+    logging.debug("calculating roc")
     if drop_intermediates is True and len(fps) > 2:
         optimal_idxs = np.where(np.r_[True, np.logical_or(np.diff(fps, 2), np.diff(tps, 2)), True])[0]
         fps = fps[optimal_idxs]
@@ -108,6 +109,7 @@ def roc(fps: np.ndarray, tps: np.ndarray, thresholds: np.ndarray, drop_intermedi
 
 @ignore_numpy_warning
 def pr(fps: np.ndarray, tps: np.ndarray, thresholds: np.ndarray) -> np.ndarray:
+    logging.debug("calculating precision recall curve")
     precision = tps / (tps + fps)
     precision[np.isnan(precision)] = 0
     recall = tps / tps[-1]
@@ -121,6 +123,7 @@ def pr(fps: np.ndarray, tps: np.ndarray, thresholds: np.ndarray) -> np.ndarray:
 
 
 def confmat(fps: np.ndarray, tps: np.ndarray) -> np.ndarray:
+    logging.debug("calculating confusion matrix")
     # true negatives are given by
     tns = fps[-1] - fps
     # false negatives are given by
@@ -209,6 +212,14 @@ def auc(x, y):
         area = np.nan
     else:
         direction = 1
+        dx = np.diff(x)
+        if np.any(dx < 0):
+            if np.all(dx <= 0):
+                direction = -1
+            else:
+                logging.error("direction of x argument in auc function is neither increasing nor decreasing.exiting")
+                area = np.nan
+
         area = direction * np.trapz(y, x)
         if isinstance(area, np.memmap):
             # Reductions such as .sum used internally in np.trapz do not return a
@@ -255,6 +266,7 @@ def get_default_threshold(pred: np.ndarray) -> float:
 
 
 def calc_curves_and_metrics(ytrue, yscore):
+    logging.debug("calculting curves and metrics")
     fps, tps, thr = binary_clf_curve(ytrue, yscore)
     roc_curve = roc(fps, tps, thr)
     pr_curve = pr(fps, tps, thr)
@@ -283,6 +295,7 @@ def confidence_interval(series, interval=0.95):
 
 
 def summary_metrics(roc_curve, pr_curve):
+    logging.debug("Calculating summary metrics")
     ppv, tpr, _ = pr_curve
     auc_roc = auc(*roc_curve[:-1])
     auc_pr = auc(tpr, ppv)
@@ -292,24 +305,28 @@ def summary_metrics(roc_curve, pr_curve):
 
 
 def dataset_curves_and_metrics(ytrue, yscore, predname):
+    logging.info("calculating dataset curves and metrics")
     roc_curve, pr_curve, cmat, metrics = calc_curves_and_metrics(ytrue, yscore)
     smry_metrics = summary_metrics(roc_curve, pr_curve)
 
+    logging.debug("metrics to dataframe")
     metrics = pd.DataFrame(metrics.values(),
                            columns=roc_curve[2][1:],
                            index=pd.MultiIndex.from_product([[predname], metrics.keys()])).round(3)
-
+    logging.debug("roc to dataframe")
     roc_df = pd.DataFrame(roc_curve[:-1].T,
                           columns=pd.MultiIndex.from_product([[predname], [smry_metrics["aucroc"]], ["fpr", "tpr"]],
                                                              names=["predictor", "auc", "metric"]),
                           index=roc_curve[-1].round(3))
 
-    pr_df = pd.DataFrame(pr_curve[:-1].T,
+    logging.debug("pr curve to dataframe")
+    pr_df = pd.DataFrame(pr_curve[1::-1].T,
                          columns=pd.MultiIndex.from_product(
-                             [[predname], [smry_metrics["aucpr"]], [smry_metrics["aps"]], ["ppv", "tpr"]],
+                             [[predname], [smry_metrics["aucpr"]], [smry_metrics["aps"]], ["tpr", "ppv"]],
                              names=["predictor", "auc", "aps", "metric"]),
                          index=pr_curve[-1].round(3))
 
+    logging.debug("confusion matrix to dataframe")
     cmat = pd.DataFrame(zip(*cmat),
                         columns=pd.MultiIndex.from_product([[predname], ["tn", "fp", "fn", "tp"]]),
                         index=roc_curve[-1][1:].round(3)).astype(int)
@@ -336,17 +353,24 @@ def bootstrap_curves_and_metrics(aln_refpred, predname, n):
 
 
 def target_curves_and_metrics(aln_refpred, predname):
+    logging.info("calculating target curves and metrics")
+
     target_metrics = {}
+    print(len(aln_refpred.index.get_level_values(0).unique()))
     for tgt, tgt_scores in aln_refpred.groupby(level=0):
+        logging.debug(tgt)
         roc_tgt, pr_tgt, cmat_tgt, metrics_tgt = calc_curves_and_metrics(tgt_scores[('ref', 'states')].values,
                                                                          tgt_scores[(predname, 'scores')].values)
+        # print(len(metrics_tgt))
         # save in a data-structure easily convertible to pd.DataFrame
         tgt_d = {(tgt, m): dict(np.stack([roc_tgt[2][1:], metrics_tgt[m]], axis=1)) for m in metrics_tgt}
         # update metrics dict
         target_metrics = {**target_metrics, **tgt_d}
 
+    logging.debug("converting target metrics dict to dataframe")
+    print(len(target_metrics))
     target_metrics = pd.DataFrame(target_metrics).round(3).sort_index(ascending=False).fillna(method='ffill').T
-    logging.debug("target metrics done")
+    logging.debug("target metrics and curves done")
     return target_metrics
 
 
@@ -386,7 +410,7 @@ def bvaluation(reference: str, predictions: list, outpath=".", dataset=True, tar
             cmats.append(cmat)
 
         if bootstrap is True:
-            bootstrap_metrics = bootstrap_curves_and_metrics(aln_ref_pred, predname, 1000)
+            bootstrap_metrics = bootstrap_curves_and_metrics(aln_ref_pred, predname, 100)
             bootstrap_metrics.to_csv(outpath / ".".join([refname, run_tag, predname, "bootstrap", "metrics", "csv"]))
 
         if target is True:
