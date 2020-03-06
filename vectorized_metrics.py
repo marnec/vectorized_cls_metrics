@@ -56,6 +56,7 @@ def binary_clf_curve(y_true: np.ndarray, y_score: np.ndarray) -> Tuple[np.ndarra
 
     # accumulate the true positives with decreasing threshold
     fps = 1 + threshold_idxs - tps
+    logging.debug("fps: {}, ")
     return fps, tps, y_score[threshold_idxs]
 
 
@@ -82,7 +83,7 @@ def roc(fps: np.ndarray, tps: np.ndarray, thresholds: np.ndarray, drop_intermedi
 
     :rtype: np.ndarray, np.ndarray, np.ndarray
     """
-    logging.debug("calculating roc")
+    logging.debug("calculating roc: {} {} {}".format(fps[:5], tps[:5], thresholds[:5]))
     if drop_intermediates is True and len(fps) > 2:
         optimal_idxs = np.where(np.r_[True, np.logical_or(np.diff(fps, 2), np.diff(tps, 2)), True])[0]
         fps = fps[optimal_idxs]
@@ -138,10 +139,13 @@ def find_length_mismatches(p: pd.DataFrame) -> List[str]:
     for tgt, tgt_aligned in p.groupby(level=0):
         ps = tgt_aligned[(lbl, "states")].values
         rs = tgt_aligned[("ref", "states")].values
-        if np.any(np.isnan(ps)) and not np.all(np.isnan(ps)):
+
+        if len(ps) < len(rs):
+        # if np.any(np.isnan(ps)) and not np.all(np.isnan(ps)):
             inconsistent_targets.append(tgt)
             logging.warning("prediction is missing some residues; {} excluded".format(tgt))
-        if np.any(np.isnan(rs)):
+        elif len(ps) > len(rs):
+        # if np.any(np.isnan(rs)):
             inconsistent_targets.append(tgt)
             logging.warning("prediction is longer than reference; {} excluded".format(tgt))
 
@@ -193,10 +197,13 @@ def negative_predictive_value(tn, fn):
 def matt_cc(tn, fp, fn, tp):
     numer = (tp*tn - fp*fn)
     denom = (np.sqrt((tp+fp) * (tp+fn) * (tn+fp) * (tn+fn)))
-    return np.divide(numer, denom, out=np.zeros_like(numer).astype(float), where=denom != 0)
+    mcc = np.divide(numer, denom, out=np.zeros_like(numer).astype(float), where=denom != 0)
+    logging.debug("mcc: {} {} {}".format(numer, denom, mcc))
+    return mcc
 
 
 def auc(x, y):
+    logging.debug("calculating auc")
     """ Compute Area Under the Curve (AUC) using the trapezoidal rule.
 
     :param x: x coordinates. These must be either monotonic increasing or monotonic decreasing
@@ -267,6 +274,7 @@ def get_default_threshold(pred: np.ndarray) -> float:
 
 def calc_curves_and_metrics(ytrue, yscore):
     logging.debug("calculting curves and metrics")
+    logging.debug("positive labels: ref {} pred {}".format(ytrue.sum(), yscore.sum()))
     fps, tps, thr = binary_clf_curve(ytrue, yscore)
     roc_curve = roc(fps, tps, thr)
     pr_curve = pr(fps, tps, thr)
@@ -295,12 +303,13 @@ def confidence_interval(series, interval=0.95):
 
 
 def summary_metrics(roc_curve, pr_curve):
-    logging.debug("Calculating summary metrics")
+    logging.debug("calculating summary metrics")
     ppv, tpr, _ = pr_curve
     auc_roc = auc(*roc_curve[:-1])
     auc_pr = auc(tpr, ppv)
+    logging.debug("calculating average precision score")
     aps = -np.sum(np.diff(tpr[::-1]) * ppv[::-1][:-1])
-
+    logging.debug("building summary metrics dict")
     return dict(aucroc=np.round(auc_roc, 3), aucpr=np.round(auc_pr, 3), aps=np.round(aps, 3))
 
 
@@ -309,10 +318,14 @@ def dataset_curves_and_metrics(ytrue, yscore, predname):
     roc_curve, pr_curve, cmat, metrics = calc_curves_and_metrics(ytrue, yscore)
     smry_metrics = summary_metrics(roc_curve, pr_curve)
 
+    # print(metrics)
+    indexes, values = zip(*metrics.items())
+    # print(values)
     logging.debug("metrics to dataframe")
-    metrics = pd.DataFrame(metrics.values(),
+    metrics = pd.DataFrame(values,
                            columns=roc_curve[2][1:],
-                           index=pd.MultiIndex.from_product([[predname], metrics.keys()])).round(3)
+                           index=pd.MultiIndex.from_product([[predname], indexes])).round(3)
+
     logging.debug("roc to dataframe")
     roc_df = pd.DataFrame(roc_curve[:-1].T,
                           columns=pd.MultiIndex.from_product([[predname], [smry_metrics["aucroc"]], ["fpr", "tpr"]],
@@ -356,19 +369,20 @@ def target_curves_and_metrics(aln_refpred, predname):
     logging.info("calculating target curves and metrics")
 
     target_metrics = {}
-    print(len(aln_refpred.index.get_level_values(0).unique()))
+    logging.debug("number of predictors: {}".format(len(aln_refpred.index.get_level_values(0).unique())))
     for tgt, tgt_scores in aln_refpred.groupby(level=0):
-        logging.debug(tgt)
+        logging.debug("{} : {}...".format(tgt, tgt_scores[predname]["scores"].values[:4]))
         roc_tgt, pr_tgt, cmat_tgt, metrics_tgt = calc_curves_and_metrics(tgt_scores[('ref', 'states')].values,
                                                                          tgt_scores[(predname, 'scores')].values)
-        # print(len(metrics_tgt))
+                # print(len(metrics_tgt))
         # save in a data-structure easily convertible to pd.DataFrame
         tgt_d = {(tgt, m): dict(np.stack([roc_tgt[2][1:], metrics_tgt[m]], axis=1)) for m in metrics_tgt}
         # update metrics dict
         target_metrics = {**target_metrics, **tgt_d}
 
     logging.debug("converting target metrics dict to dataframe")
-    print(len(target_metrics))
+    logging.debug("number of targets: {}".format(len(target_metrics)))
+
     target_metrics = pd.DataFrame(target_metrics).round(3).sort_index(ascending=False).fillna(method='ffill').T
     logging.debug("target metrics and curves done")
     return target_metrics
@@ -397,6 +411,9 @@ def bvaluation(reference: str, predictions: list, outpath=".", dataset=True, tar
         aln_ref_pred, wrong_tgt = align_reference_prediction(ref_obj, pred_obj)  # remove targets w/ errors
 
         all_preds.update(pred_obj)  # add reference to be aligned with all preds
+
+        logging.info("number of targets {}".format(len(aln_ref_pred.groupby(level=0).count())))
+        logging.info("number of labels: {}".format(len(aln_ref_pred)))
 
         roc_curve, pr_curve, cmat, dataset_metrics, smry_metrics = dataset_curves_and_metrics(
             aln_ref_pred[('ref', 'states')].values,
