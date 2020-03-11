@@ -4,14 +4,14 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 from pathlib import Path
-from typing import Tuple, List, Union
+from typing import Tuple, List, Union, Callable
 
 # relative imports
 from parsers import parse_reference, parse_prediction
 from logger import set_logger
 
 
-def ignore_numpy_warning(func):
+def ignore_numpy_warning(func: Callable) -> Callable :
     def wrapper(*args):
         with warnings.catch_warnings():
             warnings.filterwarnings('ignore')
@@ -52,10 +52,10 @@ def binary_clf_curve(y_true: np.ndarray, y_score: np.ndarray) -> Tuple[np.ndarra
     distinct_value_indices = np.where(np.diff(y_score))[0]
     threshold_idxs = np.r_[distinct_value_indices, y_true.size - 1]
 
-    tps = np.cumsum(y_true, dtype=np.float64)[threshold_idxs]
-
     # accumulate the true positives with decreasing threshold
+    tps = np.cumsum(y_true, dtype=np.float64)[threshold_idxs]
     fps = 1 + threshold_idxs - tps
+
     logging.debug("fps: {}, ")
     return fps, tps, y_score[threshold_idxs]
 
@@ -110,20 +110,47 @@ def roc(fps: np.ndarray, tps: np.ndarray, thresholds: np.ndarray, drop_intermedi
 
 @ignore_numpy_warning
 def pr(fps: np.ndarray, tps: np.ndarray, thresholds: np.ndarray) -> np.ndarray:
+    """Compute precision-recall pairs for different probability thresholds
+
+    The last precision and recall values are 1. and 0. respectively and do not
+    have a corresponding threshold.  This ensures that the graph starts on the
+    y axis.
+
+    :param fps: decreasing count of false positives
+    :type fps: np.ndarray
+    :param tps: increasing count of true positives
+    :type tps:  np.ndarray
+    :param thresholds: Decreasing thresholds on the decision function used to compute fpr and tpr. `thresholds[0]`
+        represents no instances being predicted and is arbitrarily set to `max(y_score) + 1`
+    :type thresholds: np.ndarray
+    :return:
+        - precision : Increasing precision values such that element i is the precision of
+        predictions with score >= thresholds[i] and the last element is 1.
+        - recall : Increasing recall values such that element i is the recall of predictions with score >= thresholds[i]
+        and the last element is 0.
+        - thresholds : Decreasing thresholds on the decision function used to compute precision and recall.
+    """
+
     logging.debug("calculating precision recall curve")
     precision = tps / (tps + fps)
     precision[np.isnan(precision)] = 0
     recall = tps / tps[-1]
 
-    # stop when full recall attained
-    # last_ind = tps.searchsorted(tps[-1])
-    # sl = slice(last_ind, None)
-
-    # don't stop when full recall attained
     return np.array([np.r_[1, precision], np.r_[0, recall], np.r_[thresholds[0] + 1, thresholds]], dtype=np.float64).round(3)
 
 
 def confmat(fps: np.ndarray, tps: np.ndarray) -> np.ndarray:
+    """Compute confusion matrix for different probability thresholds
+
+    Confusion matrix `[[tn fp] [fn tp]]` for the binary case with labels [0,1] is computed for each threshold.
+    Computation starts from the count of fp (`fps` param) and tp (`tps` param) for each threshold. For each
+    threshold t in a series of decreasing threshold, $tn_t$ is calculated as $p - fp_t$ where $p$ is the number
+    of positives labels and is represented by the last element of
+
+    :param fps:
+    :param tps:
+    :return:
+    """
     logging.debug("calculating confusion matrix")
     # true negatives are given by
     tns = fps[-1] - fps
@@ -203,7 +230,6 @@ def matt_cc(tn, fp, fn, tp):
 
 
 def auc(x, y):
-    logging.debug("calculating auc")
     """ Compute Area Under the Curve (AUC) using the trapezoidal rule.
 
     :param x: x coordinates. These must be either monotonic increasing or monotonic decreasing
@@ -213,6 +239,7 @@ def auc(x, y):
     :return: area under the curve
     :rtype: float
     """
+    logging.debug("calculating auc")
 
     if x.shape[0] < 2:
         logging.warning('At least 2 points are needed to compute area under curve, but x.shape = %s' % x.shape)
