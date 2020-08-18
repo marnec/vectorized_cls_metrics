@@ -56,7 +56,8 @@ def baseline_random(ref, n=100, basename="", target=True, outpath='.'):
         if target is True:
             df = pd.concat(tgt_data[m])
             df.to_csv(outpath / ".".join([basename, "random", "all", "target", m, "metrics", "csv"]))
-            df.describe().round(3).to_csv(
+            df = pd.concat([df.groupby(level=1).describe()], keys=['random'])
+            df.round(3).to_csv(
                 outpath / ".".join([basename, "random", "avg", "target", m, "metrics", "csv"]))
         logging.debug("target csv written for threshold".format(m))
 
@@ -106,7 +107,8 @@ def baseline_shuffle_dataset(ref, n=100, basename="", target=True, outpath="."):
         if target is True:
             df = pd.concat(tgt_data[m])
             df.to_csv(outpath / ".".join([basename, "shuffledataset", "all", "target", m, "metrics", "csv"]))
-            df.describe().round(3).to_csv(
+            df = pd.concat([df.groupby(level=1).describe()], keys=['shuffledataset'])
+            df.round(3).to_csv(
                 outpath / ".".join([basename, "shuffledataset", "avg", "target", m, "metrics", "csv"]))
 
         logging.debug("target csv written for threshold".format(m))
@@ -165,7 +167,8 @@ def baseline_shuffle_targets(ref, n=100, basename="", target=True, outpath="."):
         if target is True:
             df = pd.concat(tgt_data[m])
             df.to_csv(outpath / ".".join([basename, "shuffletargets", "all", "target", m, "metrics", "csv"]))
-            df.describe().round(3).to_csv(
+            df = pd.concat([df.groupby(level=1).describe()], keys=['shuffletargets'])
+            df.round(3).to_csv(
                 outpath / ".".join([basename, "shuffletargets", "avg", "target", m, "metrics", "csv"]))
 
 
@@ -210,7 +213,8 @@ def baseline_fixed_positive_fraction(ref, f, n=100, basename="", target=True, ou
         if target is True:
             df = pd.concat(tgt_data[m])
             df.to_csv(outpath / ".".join([basename, "fixedposfrc", "all", "target", m, "metrics", "csv"]))
-            df.describe().round(3).to_csv(
+            df = pd.concat([df.groupby(level=1).describe()], keys=['fixedposfrc'])
+            df.round(3).to_csv(
                 outpath / ".".join([basename, "fixedposfrc", "avg", "target", m, "metrics", "csv"]))
 
 
@@ -224,8 +228,8 @@ def get_reference(reference):
 
 if __name__ == "__main__":
     set_logger("DEBUG")
-    # ref, refname = get_reference("tests/ref.test.txt")
-    ref, refname = get_reference("/home/marnec/Projects/CAID/caid/data/disorder/new-disprot-all_simple.txt")
+    ref, refname = get_reference("tests/ref.test.txt")
+    # ref, refname = get_reference("/home/marnec/Projects/CAID/data/referencesdisorder/new-disprot-all_simple.txt")
     # baseline_random(ref, basename=refname)
     # baseline_shuffle_dataset(ref, basename=refname)
     baseline_shuffle_targets(ref, 2, basename=refname)

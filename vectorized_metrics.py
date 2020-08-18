@@ -1,3 +1,4 @@
+import argparse
 import logging
 import warnings
 import numpy as np
@@ -55,9 +56,12 @@ def binary_clf_curve(y_true: np.ndarray, y_score: np.ndarray) -> Tuple[np.ndarra
     # accumulate the true positives with decreasing threshold
     tps = np.cumsum(y_true, dtype=np.float64)[threshold_idxs]
     fps = 1 + threshold_idxs - tps
+    thr = y_score[threshold_idxs]
 
-    logging.debug("fps: {}, ")
-    return fps, tps, y_score[threshold_idxs]
+    logging.debug('number of scores: {}'.format(len(y_score)))
+    logging.debug('number of finite distinct scores: {}'.format(len(set(thr[~np.isnan(thr)]))))
+    logging.debug("fps: {}..., tps: {}...".format(fps[:5], tps[:5]))
+    return fps, tps, thr
 
 
 def roc(fps: np.ndarray, tps: np.ndarray, thresholds: np.ndarray, drop_intermediates: bool = False) -> np.ndarray:
@@ -135,7 +139,9 @@ def pr(fps: np.ndarray, tps: np.ndarray, thresholds: np.ndarray) -> np.ndarray:
     precision = tps / (tps + fps)
     precision[np.isnan(precision)] = 0
     recall = tps / tps[-1]
+    recall[np.isnan(recall)] = 0
 
+    logging.debug('ppv: {}; rec: {}'.format(precision[:4], recall[:4]))
     return np.array([np.r_[1, precision], np.r_[0, recall], np.r_[thresholds[0] + 1, thresholds]], dtype=np.float64).round(3)
 
 
@@ -147,9 +153,12 @@ def confmat(fps: np.ndarray, tps: np.ndarray) -> np.ndarray:
     threshold t in a series of decreasing threshold, $tn_t$ is calculated as $p - fp_t$ where $p$ is the number
     of positives labels and is represented by the last element of
 
-    :param fps:
-    :param tps:
-    :return:
+    :param fps: decreasing count of false positives
+    :type fps: np.ndarray
+    :param tps: increasing count of true positives
+    :type tps:  np.ndarray
+    :return: array of shape (len(fps), 4) with the count of TNs FPs FNs adn TPs for each couple of values (FP, TP)
+        in `fps`, `tps` params.
     """
     logging.debug("calculating confusion matrix")
     # true negatives are given by
@@ -160,7 +169,26 @@ def confmat(fps: np.ndarray, tps: np.ndarray) -> np.ndarray:
     return np.array([tns, fps, fns, tps], dtype=np.float64)
 
 
+# TODO: this cannot work since once in a dataframe ref and pred will always have the same length.
+#  Missing labels will be replaced by nans and those nans will be indistiguishable from masked regions in reference
+#  Nans in predictions should instead be safe to check
 def find_length_mismatches(p: pd.DataFrame) -> List[str]:
+    """Compare lengths of targets in reference and prediction
+
+    Store and log on the warning level ids of targets with inconsistent lengths when found,
+    then return a list of the ids with inconsistent lengths.
+
+    :param p: aligned reference and prediction. It is expected in the format:
+
+            |          |   | ref    | ref | predname | predname |
+            |----------|---|--------|-----|----------|----------|
+            |          |   | states | seq | states   | scores   |
+            | target 1 | 1 | 1      | M   | 1        | 0.789    |
+            | target 1 | 2 | 1      | S   | 0        | 0.456    |
+
+    :type p: pd.DataFrame
+    :return: list of target ids where the length of the reference is different from the length of the prediction
+    """
     inconsistent_targets = []
     lbl = p.columns.get_level_values(0).unique()[1]
     for tgt, tgt_aligned in p.groupby(level=0):
@@ -183,11 +211,13 @@ def align_reference_prediction(ref: dict, pred: dict, drop_missing: bool = True)
     # merge reference a prediction dicts and cast to Pandas.DataFrame
     aln_pred = pd.DataFrame({**ref, **pred})
     predname = aln_pred.columns.get_level_values(0)[-1]
+
     logging.debug("aligned reference and prediction; {}".format(predname))
     # check for length mismatch between reference and prediction
     wrong_len_preds = find_length_mismatches(aln_pred)
     # remove targets with length mismatch
     aln_pred = aln_pred.loc[~aln_pred.index.get_level_values(0).isin(wrong_len_preds)]
+
     # remove rows with nan (now it's only possible if all residues are missing)
     isnan = aln_pred.isna().all()
     isnan = isnan[isnan == 1].index.tolist()
@@ -213,7 +243,9 @@ def fbeta(precision: np.ndarray, recall: np.ndarray, beta: Union[float, int] = 1
     beta2 = beta ** 2
     denom = beta2 * precision + recall
     denom[denom == 0.] = 1  # avoid division by 0
-    return (1 + beta2) * precision * recall / denom
+    fbeta = ((1 + beta2) * precision * recall) / denom
+    logging.debug("f_{}: denom: {}; score: {}".format(beta, denom[:4], fbeta[:4]))
+    return fbeta
 
 
 def negative_predictive_value(tn, fn):
@@ -225,7 +257,7 @@ def matt_cc(tn, fp, fn, tp):
     numer = (tp*tn - fp*fn)
     denom = (np.sqrt((tp+fp) * (tp+fn) * (tn+fp) * (tn+fn)))
     mcc = np.divide(numer, denom, out=np.zeros_like(numer).astype(float), where=denom != 0)
-    logging.debug("mcc: {} {} {}".format(numer, denom, mcc))
+    logging.debug("mcc: num: {}; denom: {}; mcc: {}".format(numer[:4], denom[:4], mcc[:4]))
     return mcc
 
 
@@ -296,12 +328,15 @@ def get_metrics(roc_curve, pr_curve, cmats: np.ndarray) -> dict:
 
 
 def get_default_threshold(pred: np.ndarray) -> float:
-    return pred[pred[:, 0] == 1][:, 1].min()
+    thr = pred[pred[:, 0] == 1][:, 1].min()
+    logging.debug('default threshold: {}'.format(thr))
+    return thr
 
 
 def calc_curves_and_metrics(ytrue, yscore):
     logging.debug("calculting curves and metrics")
     logging.debug("positive labels: ref {} pred {}".format(ytrue.sum(), yscore.sum()))
+    logging.debug("negative labels: ref {} pred {}".format(len(ytrue) - ytrue.sum(), len(yscore) - yscore.sum()))
     fps, tps, thr = binary_clf_curve(ytrue, yscore)
     roc_curve = roc(fps, tps, thr)
     pr_curve = pr(fps, tps, thr)
@@ -345,9 +380,7 @@ def dataset_curves_and_metrics(ytrue, yscore, predname):
     roc_curve, pr_curve, cmat, metrics = calc_curves_and_metrics(ytrue, yscore)
     smry_metrics = summary_metrics(roc_curve, pr_curve)
 
-    # print(metrics)
     indexes, values = zip(*metrics.items())
-    # print(values)
     logging.debug("metrics to dataframe")
     metrics = pd.DataFrame(values,
                            columns=roc_curve[2][1:],
@@ -377,6 +410,7 @@ def dataset_curves_and_metrics(ytrue, yscore, predname):
 
 
 def bootstrap_curves_and_metrics(aln_refpred, predname, n):
+    logging.info("Bootstrapping {} times with replacement".format(n))
     bootstrap_metrics = {}
 
     for i, data_bts in enumerate(bootstrap_reference_and_prediction(aln_refpred[('ref', 'states')].values,
@@ -396,12 +430,12 @@ def target_curves_and_metrics(aln_refpred, predname):
     logging.info("calculating target curves and metrics")
 
     target_metrics = {}
-    logging.debug("number of predictors: {}".format(len(aln_refpred.index.get_level_values(0).unique())))
+    logging.debug("number of targets: {}".format(len(aln_refpred.index.get_level_values(0).unique())))
+    logging.debug("number of predicors: {}".format(len(aln_refpred.columns) / 2))
     for tgt, tgt_scores in aln_refpred.groupby(level=0):
         logging.debug("{} : {}...".format(tgt, tgt_scores[predname]["scores"].values[:4]))
         roc_tgt, pr_tgt, cmat_tgt, metrics_tgt = calc_curves_and_metrics(tgt_scores[('ref', 'states')].values,
                                                                          tgt_scores[(predname, 'scores')].values)
-                # print(len(metrics_tgt))
         # save in a data-structure easily convertible to pd.DataFrame
         tgt_d = {(tgt, m): dict(np.stack([roc_tgt[2][1:], metrics_tgt[m]], axis=1)) for m in metrics_tgt}
         # update metrics dict
@@ -409,8 +443,7 @@ def target_curves_and_metrics(aln_refpred, predname):
 
     logging.debug("converting target metrics dict to dataframe")
     logging.debug("number of targets: {}".format(len(target_metrics)))
-
-    target_metrics = pd.DataFrame(target_metrics).round(3).sort_index(ascending=False).fillna(method='ffill').T
+    target_metrics = pd.DataFrame(target_metrics).round(3).sort_index(ascending=False).fillna(method='ffill').fillna(method='backfill').T
     logging.debug("target metrics and curves done")
     return target_metrics
 
@@ -431,9 +464,11 @@ def bvaluation(reference: str, predictions: list, outpath=".", dataset=True, tar
     dts_data = {}
     tgt_data = {}
     bts_data = {}
+    ci_data = {}
 
     for prediction in predictions:
         predname = Path(prediction).stem
+        logging.info('benchmarking {}'.format(predname))
         pred_obj = parse_prediction(prediction, accs, predname)  # returns dict
         aln_ref_pred, wrong_tgt = align_reference_prediction(ref_obj, pred_obj)  # remove targets w/ errors
 
@@ -446,6 +481,10 @@ def bvaluation(reference: str, predictions: list, outpath=".", dataset=True, tar
             aln_ref_pred[('ref', 'states')].values,
             aln_ref_pred[(predname, 'scores')].values,
             predname)
+        np.savetxt(outpath / '{}.rawscores.distribution.txt'.format(predname),
+                   aln_ref_pred[(predname, 'scores')].values, fmt='%.3f')
+        np.savetxt(outpath / '{}.thresholds.distribution.txt'.format(predname),
+                   roc_curve.index.values, fmt='%.3f')
 
         if dataset is True:
             dataset_metrics.to_csv(outpath / ".".join([refname, run_tag, predname, "dataset", "metrics", "csv"]))
@@ -479,6 +518,10 @@ def bvaluation(reference: str, predictions: list, outpath=".", dataset=True, tar
             if bootstrap is True:
                 # pd.concat is a workaround to prepend a level to the existing index, creating a MultiIndex
                 bts_data.setdefault(m, []).append(pd.concat(
+                    [bootstrap_metrics[thresholds[m]].unstack()],
+                    keys=[predname]).assign(thr=thresholds[m]))
+
+                ci_data.setdefault(m, []).append(pd.concat(
                     [bootstrap_metrics[thresholds[m]].unstack().apply(confidence_interval).T],
                     keys=[predname]).assign(thr=thresholds[m]))
 
@@ -493,12 +536,13 @@ def bvaluation(reference: str, predictions: list, outpath=".", dataset=True, tar
             pd.concat(tgt_data[m]).to_csv(outpath / ".".join([refname, run_tag, "all", "target", m, "metrics", "csv"]))
         if bootstrap is True:
             pd.concat(bts_data[m]).to_csv(outpath / ".".join([refname, run_tag, "all", "bootstrap", m, "metrics", "csv"]))
+            pd.concat(ci_data[m]).to_csv(outpath / ".".join([refname, run_tag, "all", "ci", m, "metrics", "csv"]))
 
     all_preds_aligned, excluded = align_reference_prediction(ref_obj, all_preds)
     all_preds_aligned.to_csv(outpath / ".".join([refname, run_tag, "all", "dataset", "_", "predictions", "csv"]))
 
     if excluded:
-        logging.warning("excuded targets: {}".format(", ".join(excluded)))
+        logging.warning("excluded targets: {}".format(", ".join(excluded)))
 
     if dataset is True:
         pd.concat(roc_curves, axis=1).sort_index(ascending=False)\
@@ -509,20 +553,56 @@ def bvaluation(reference: str, predictions: list, outpath=".", dataset=True, tar
             .to_csv(outpath / ".".join([refname, run_tag, "all", "dataset", "_", "cmat", "csv"]))
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(
+        prog='caid-assess', description="CAID: Critical Assessment of Intrinsic Disorder",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+
+    parser.add_argument('reference', help='reference file')
+
+    parser.add_argument('predictions', nargs='+', help="prediction files")
+
+    parser.add_argument('-o', '--outputDir', default='.',
+                        help='directory where the output will be written (default: cwd)')
+    parser.add_argument('-d', '--dataset', default=True, action='store_false',
+                        help='switch to decide if dataset metrics are computed')
+    parser.add_argument('-t', '--target', default=False, action='store_true',
+                        help='switch to decide if target metrics are computed')
+    parser.add_argument('-b', '--bootstrap', default=False, action='store_true',
+                        help='switch to decide if bootstrapping and CI are calculated')
+
+    parser.add_argument('-l', '--log', type=str, default=None, help='log file')
+    parser.add_argument("-ll", "--logLevel", default="INFO",
+                        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+                        help='log level filter. All levels <= choice will be displayed')
+
+    args = parser.parse_args()
+    return args
+
+
 if __name__ == "__main__":
-    set_logger(0)
-    allpreds = ['D001_PyHCA.out', 'D002_Predisorder.out', 'D003_IUPred2A-long.out', 'D004_IUPred2A-short.out',
-                'D005_IUPred-long.out', 'D006_IUPred-short.out', 'D007_FoldUnfold.out', 'D008_IsUnstruct.out',
-                'D009_GlobPlot.out', 'D010_DisPredict-2.out', 'D011_DISOPRED-3.1.out', 'D013_fIDPln.out',
-                'D014_fIDPnn.out', 'D015_VSL2B.out', 'D016_DisEMBL-HL.out', 'D017_DisEMBL-465.out',
-                'D018_ESpritz-D.out', 'D019_ESpritz-N.out', 'D020_ESpritz-X.out', 'D021_MobiDB-lite.out',
-                'D022_S2D-1.out', 'D023_S2D-2.out', 'D024_DisoMine.out', 'D025_RawMSA.out', 'D026_AUCpreD.out',
-                'D027_AUCpreD-np.out', 'D028_SPOT-Disorder1.out', 'D029_SPOT-Disorder2.out',
-                'D030_SPOT-Disorder-Single.out', 'D031_JRONN.out', 'D032_DFLpred.out', 'D033_DynaMine.out']
+    args = parse_args()
+    set_logger(args.log, args.logLevel)
+    allpreds = [
+        # 'D001_PyHCA.out', 'D002_Predisorder.out', 'D003_IUPred2A-long.out', 'D004_IUPred2A-short.out',
+        # 'D005_IUPred-long.out',
+        # 'D006_IUPred-short.out', 'D007_FoldUnfold.out', 'D008_IsUnstruct.out',
+        # 'D009_GlobPlot.out', 'D010_DisPredict-2.out', 'D011_DISOPRED-3.1.out', 'D013_fIDPln.out',
+        # 'D014_fIDPnn.out', 'D015_VSL2B.out', 'D016_DisEMBL-HL.out', 'D017_DisEMBL-465.out',
+        # 'D018_ESpritz-D.out', 'D019_ESpritz-N.out', 'D020_ESpritz-X.out', 'D021_MobiDB-lite.out',
+        # 'D022_S2D-1.out', 'D023_S2D-2.out', 'D024_DisoMine.out', 'D025_RawMSA.out', 'D026_AUCpreD.out',
+        # 'D027_AUCpreD-np.out', 'D028_SPOT-Disorder1.out', 'D029_SPOT-Disorder2.out',
+        # 'D030_SPOT-Disorder-Single.out', 'D031_JRONN.out', 'D032_DFLpred.out', 'D033_DynaMine.out'
+    ]
 
     allpreds = [Path("data/predictions/" + p) for p in allpreds]
+    bvaluation(args.reference, args.predictions, outpath=args.outputDir, dataset=args.dataset, target=args.target,
+               bootstrap=args.bootstrap, run_tag="analysis")
 
-    bvaluation("tests/ref.test.txt", ["tests/p1.test.txt", "tests/p2.test.txt"])
-    # bvaluation("data/new-disprot-all_simple.txt", allpreds, "./results", dataset=True, target=True, bootstrap=True)
+    # bvaluation("tests/ref.test.txt", ["tests/p1.test.txt", "tests/p2.test.txt"])
+    # bvaluation("/home/marnec/Projects/CAID/data/references/binding/disprot-binding-all.txt",
+    #            ["/home/marnec/Projects/CAID/data/predictions/binding/B001_ANCHOR.out"],
+    #            "./results", dataset=True, target=True, bootstrap=False)
     # bvaluation("data/new-disprot-all_simple.txt", ["data/predictions/D009_GlobPlot.out"])
+
 

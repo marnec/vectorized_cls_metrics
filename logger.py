@@ -1,11 +1,11 @@
 import logging
 
 
-def set_logger(level, logfile=None):
+def set_logger(logfile, level):
     handlers = list()
-    log_formatter = logging.Formatter('%(levelname)-8s | %(message)s')
+    log_formatter = logging.Formatter('%(asctime)s | %(module)-13s | %(levelname)-8s | %(message)s')
 
-    if logfile is not None:
+    if logfile:
         file_handler = logging.FileHandler(logfile, 'a')
         file_handler.setFormatter(log_formatter)
         handlers.append(file_handler)
