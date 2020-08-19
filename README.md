@@ -6,12 +6,16 @@
 
 ## Introduction
 `vectorized_cls_metrics` is a library the vectorizes the calculation of binary classification metrics. It revolves 
-around `numpy` and builds on the `binary_cls_curve` function from `scikit-learn.metrics`. While the latter focuses on
-providing a robust and consistent API to obtain classification metrics, vectorized_cls_metrics focuses on speed and 
+around `numpy` and builds on the `binary_cls_curve` function from `scikit-learn.metrics`. 
+
+While the latter focuses on
+providing a robust and consistent API to obtain classification metrics, `vectorized_cls_metrics` focuses on speed and 
 outputs classification metrics for all thresholds in a fraction of time that would normally take with the `sklearn` api 
 called in a for-loop.
 
 ![performance](results.png)
+Time required by `vectorized_cls_metrics` and `sklearn` to perform the same calculation. Reproduce this result with the 
+`stats.ipynb` jupyter notebook.  
 
 ## Dependencies
 * `numpy`
