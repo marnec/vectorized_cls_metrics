@@ -58,6 +58,7 @@ def binary_clf_curve(y_true: np.ndarray, y_score: np.ndarray) -> Tuple[np.ndarra
     fps = 1 + threshold_idxs - tps
     thr = y_score[threshold_idxs]
 
+
     logging.debug('number of scores: {}'.format(len(y_score)))
     logging.debug('number of finite distinct scores: {}'.format(len(set(thr[~np.isnan(thr)]))))
     logging.debug("fps: {}..., tps: {}...".format(fps[:5], tps[:5]))
@@ -466,11 +467,17 @@ def bvaluation(reference: str, predictions: list, outpath=".", dataset=True, tar
     bts_data = {}
     ci_data = {}
 
+
     for prediction in predictions:
         predname = Path(prediction).stem
         logging.info('benchmarking {}'.format(predname))
         pred_obj = parse_prediction(prediction, accs, predname)  # returns dict
         aln_ref_pred, wrong_tgt = align_reference_prediction(ref_obj, pred_obj)  # remove targets w/ errors
+
+        if aln_ref_pred.empty:
+            logging.error('Reference-prediction alignment resulted in an Empty array. This is usually due to '
+                          'a mismatch between reference and prediction accessions. Skipping {}'.format(predname))
+            continue
 
         all_preds.update(pred_obj)  # add reference to be aligned with all preds
 
