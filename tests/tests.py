@@ -74,4 +74,4 @@ def test_confmat(ytrue, yscore):
 
 def test_get_default_threshold():
     a = np.array([[0, 1, 1, 0], [.3, .5, .6, .4]]).T
-    assert vectorized_metrics.get_default_threshold(a) == .5
+    assert vectorized_metrics.calculate_default_threshold(a) == .5

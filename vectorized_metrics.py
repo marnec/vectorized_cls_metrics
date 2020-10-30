@@ -8,15 +8,15 @@ from pathlib import Path
 from typing import Tuple, List, Union, Callable
 
 # relative imports
-from parsers import parse_reference, parse_prediction
+from parsers import parse_reference, parse_prediction, parse_thresholds
 from logger import set_logger
 
 
-def ignore_numpy_warning(func: Callable) -> Callable :
-    def wrapper(*args):
+def ignore_numpy_warning(func: Callable) -> Callable:
+    def wrapper(*arguments):
         with warnings.catch_warnings():
             warnings.filterwarnings('ignore')
-            return func(*args)
+            return func(*arguments)
     return wrapper
 
 
@@ -57,7 +57,6 @@ def binary_clf_curve(y_true: np.ndarray, y_score: np.ndarray) -> Tuple[np.ndarra
     tps = np.cumsum(y_true, dtype=np.float64)[threshold_idxs]
     fps = 1 + threshold_idxs - tps
     thr = y_score[threshold_idxs]
-
 
     logging.debug('number of scores: {}'.format(len(y_score)))
     logging.debug('number of finite distinct scores: {}'.format(len(set(thr[~np.isnan(thr)]))))
@@ -143,7 +142,8 @@ def pr(fps: np.ndarray, tps: np.ndarray, thresholds: np.ndarray) -> np.ndarray:
     recall[np.isnan(recall)] = 0
 
     logging.debug('ppv: {}; rec: {}'.format(precision[:4], recall[:4]))
-    return np.array([np.r_[1, precision], np.r_[0, recall], np.r_[thresholds[0] + 1, thresholds]], dtype=np.float64).round(3)
+    return np.array([np.r_[1, precision], np.r_[0, recall], np.r_[thresholds[0] + 1, thresholds]], dtype=np.float64)\
+        .round(3)
 
 
 def confmat(fps: np.ndarray, tps: np.ndarray) -> np.ndarray:
@@ -196,12 +196,12 @@ def find_length_mismatches(p: pd.DataFrame) -> List[str]:
         ps = tgt_aligned[(lbl, "states")].values
         rs = tgt_aligned[("ref", "states")].values
 
-        if len(ps) < len(rs):
         # if np.any(np.isnan(ps)) and not np.all(np.isnan(ps)):
+        if len(ps) < len(rs):
             inconsistent_targets.append(tgt)
             logging.warning("prediction is missing some residues; {} excluded".format(tgt))
-        elif len(ps) > len(rs):
         # if np.any(np.isnan(rs)):
+        elif len(ps) > len(rs):
             inconsistent_targets.append(tgt)
             logging.warning("prediction is longer than reference; {} excluded".format(tgt))
 
@@ -285,7 +285,7 @@ def auc(x, y):
                 direction = -1
             else:
                 logging.error("direction of x argument in auc function is neither increasing nor decreasing.exiting")
-                area = np.nan
+                # area = np.nan
 
         area = direction * np.trapz(y, x)
         if isinstance(area, np.memmap):
@@ -328,7 +328,19 @@ def get_metrics(roc_curve, pr_curve, cmats: np.ndarray) -> dict:
                 bac=bacc, f1s=f1, f2s=f2, f05=f05, mcc=mcc, inf=inf, mk=mk)
 
 
-def get_default_threshold(pred: np.ndarray) -> float:
+def get_default_threshold(thresholds, predname, pred):
+    default_thr = None
+
+    if thresholds is not None:
+        default_thr = thresholds.get(predname)
+
+    if default_thr is None:
+        default_thr = calculate_default_threshold(pred)
+
+    return default_thr
+
+
+def calculate_default_threshold(pred: np.ndarray) -> float:
     thr = pred[pred[:, 0] == 1][:, 1].min()
     logging.debug('default threshold: {}'.format(thr))
     return thr
@@ -405,7 +417,6 @@ def dataset_curves_and_metrics(ytrue, yscore, predname):
                         columns=pd.MultiIndex.from_product([[predname], ["tn", "fp", "fn", "tp"]]),
                         index=roc_curve[-1][1:].round(3)).astype(int)
 
-
     # logging.debug("dataset metrics done")
     return roc_df, pr_df, cmat, metrics, smry_metrics
 
@@ -444,17 +455,22 @@ def target_curves_and_metrics(aln_refpred, predname):
 
     logging.debug("converting target metrics dict to dataframe")
     logging.debug("number of targets: {}".format(len(target_metrics)))
-    target_metrics = pd.DataFrame(target_metrics).round(3).sort_index(ascending=False).fillna(method='ffill').fillna(method='backfill').T
+    target_metrics = pd.DataFrame(target_metrics).round(3)\
+        .sort_index(ascending=False)\
+        .fillna(method='ffill')\
+        .fillna(method='backfill').T
     logging.debug("target metrics and curves done")
     return target_metrics
 
 
-def bvaluation(reference: str, predictions: list, outpath=".", dataset=True, target=False, bootstrap=False, run_tag="analysis"):
+def bvaluation(reference: str, predictions: list, outpath=".", dataset=True, target=False, bootstrap=False,
+               run_tag="analysis", threshold_file=None, normalize=False):
     outpath = Path(outpath)
     outpath.mkdir(parents=True, exist_ok=True)
     reference = Path(reference)
     refname = reference.stem
     ref_obj, accs = parse_reference(reference.resolve(strict=True))  # resolve raises an error if file doesn't exists
+    provided_thr = parse_thresholds(Path(threshold_file)) if threshold_file is not None else None
 
     roc_curves = []
     pr_curves = []
@@ -467,11 +483,10 @@ def bvaluation(reference: str, predictions: list, outpath=".", dataset=True, tar
     bts_data = {}
     ci_data = {}
 
-
     for prediction in predictions:
         predname = Path(prediction).stem
         logging.info('benchmarking {}'.format(predname))
-        pred_obj = parse_prediction(prediction, accs, predname)  # returns dict
+        pred_obj = parse_prediction(prediction, accs, predname, normalize=normalize)  # returns dict
         aln_ref_pred, wrong_tgt = align_reference_prediction(ref_obj, pred_obj)  # remove targets w/ errors
 
         if aln_ref_pred.empty:
@@ -508,7 +523,7 @@ def bvaluation(reference: str, predictions: list, outpath=".", dataset=True, tar
             target_metrics.to_csv(outpath / ".".join([refname, run_tag, predname, "target", "metrics", "csv"]))
 
         # {<label>: <threshold>} for each threshold a file will be saved with metrics optimized for that threshold
-        thresholds = {"default": get_default_threshold(aln_ref_pred[predname].to_numpy()),
+        thresholds = {"default": get_default_threshold(provided_thr, predname, aln_ref_pred[predname].to_numpy()),
                       **dataset_metrics.idxmax(1).loc[predname].to_dict()}
 
         # find metrics of current pred for each threshold in <thresholds>; store to be later joined with other preds
@@ -578,38 +593,22 @@ def parse_args():
     parser.add_argument('-b', '--bootstrap', default=False, action='store_true',
                         help='switch to decide if bootstrapping and CI are calculated')
 
+    parser.add_argument('-r', '--thresholds', default=None,
+                        help='file with default threshold per predictor. It will be used'
+                             ' in .default.{metrics,cmats}.csv files')
+    parser.add_argument('-n', '--normalize', default=False, action='store_true',
+                        help='linearly normalize prediction score in [0, 1] interval')
+
     parser.add_argument('-l', '--log', type=str, default=None, help='log file')
     parser.add_argument("-ll", "--logLevel", default="INFO",
                         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
                         help='log level filter. All levels <= choice will be displayed')
 
-    args = parser.parse_args()
-    return args
+    return parser.parse_args()
 
 
 if __name__ == "__main__":
     args = parse_args()
     set_logger(args.log, args.logLevel)
-    allpreds = [
-        # 'D001_PyHCA.out', 'D002_Predisorder.out', 'D003_IUPred2A-long.out', 'D004_IUPred2A-short.out',
-        # 'D005_IUPred-long.out',
-        # 'D006_IUPred-short.out', 'D007_FoldUnfold.out', 'D008_IsUnstruct.out',
-        # 'D009_GlobPlot.out', 'D010_DisPredict-2.out', 'D011_DISOPRED-3.1.out', 'D013_fIDPln.out',
-        # 'D014_fIDPnn.out', 'D015_VSL2B.out', 'D016_DisEMBL-HL.out', 'D017_DisEMBL-465.out',
-        # 'D018_ESpritz-D.out', 'D019_ESpritz-N.out', 'D020_ESpritz-X.out', 'D021_MobiDB-lite.out',
-        # 'D022_S2D-1.out', 'D023_S2D-2.out', 'D024_DisoMine.out', 'D025_RawMSA.out', 'D026_AUCpreD.out',
-        # 'D027_AUCpreD-np.out', 'D028_SPOT-Disorder1.out', 'D029_SPOT-Disorder2.out',
-        # 'D030_SPOT-Disorder-Single.out', 'D031_JRONN.out', 'D032_DFLpred.out', 'D033_DynaMine.out'
-    ]
-
-    allpreds = [Path("data/predictions/" + p) for p in allpreds]
     bvaluation(args.reference, args.predictions, outpath=args.outputDir, dataset=args.dataset, target=args.target,
-               bootstrap=args.bootstrap, run_tag="analysis")
-
-    # bvaluation("tests/ref.test.txt", ["tests/p1.test.txt", "tests/p2.test.txt"])
-    # bvaluation("/home/marnec/Projects/CAID/data/references/binding/disprot-binding-all.txt",
-    #            ["/home/marnec/Projects/CAID/data/predictions/binding/B001_ANCHOR.out"],
-    #            "./results", dataset=True, target=True, bootstrap=False)
-    # bvaluation("data/new-disprot-all_simple.txt", ["data/predictions/D009_GlobPlot.out"])
-
-
+               bootstrap=args.bootstrap, run_tag="analysis", threshold_file=args.thresholds, normalize=args.normalize)

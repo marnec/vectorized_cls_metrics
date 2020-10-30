@@ -50,7 +50,7 @@ def strip_split(string: str) -> list:
     return splitted
 
 
-def parse_prediction(predfile, reference_ids, label=None, decimals=3, threshold=0.5):
+def parse_prediction(predfile, reference_ids, label=None, decimals=3, threshold=0.5, normalize=False):
     """
 
     :param predfile:
@@ -95,9 +95,10 @@ def parse_prediction(predfile, reference_ids, label=None, decimals=3, threshold=
                     else:
                         continue
 
-                # normalize in range [0, 1]
-                if np.min(scores) < 0 or np.max(scores) > 1:
-                    scores = (scores - np.min(scores)) / np.ptp(scores)
+                if normalize is True:
+                    # normalize in range [0, 1]
+                    if np.min(scores) < 0 or np.max(scores) > 1:
+                        scores = (scores - np.min(scores)) / np.ptp(scores)
 
                 # round scores to the number of decimals passed (default 3)
                 scores = scores.round(decimals)
@@ -109,3 +110,19 @@ def parse_prediction(predfile, reference_ids, label=None, decimals=3, threshold=
 
     logging.debug('loaded prediciton as <dict>; {}'.format(label))
     return pred
+
+
+def parse_thresholds(thr_file):
+    thresholds = None
+
+    if thr_file.resolve(strict=True):
+        try:
+            thresholds = {}
+            with open(thr_file) as f:
+                for line in f:
+                    pred, thr = line.strip().split()
+                    thresholds[pred] = float(thr)
+        except IndexError:
+            logging.error('Threshold file was not formatted properly, default threshold will be estimated from scores')
+
+    return thresholds
