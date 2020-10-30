@@ -31,18 +31,9 @@ See the *vectorizedClsMetrics.pdf* for info on the general approach to metrics c
 * while parsing reference states, if a character is found that is not in {0, 1, -} a nan is returned.
 
 * while parsing prediction, if scores are missing, states will be used as scores. if states are missing, they are
-generated applying a threshold to scores. The threshold can be passed to parsing function; if it is not passed, the
-threshold defaults to 0.5. The rationale is that if only scores are provided without a threshold, they are interpreted
-as a probability density function uniformly distributed between 0 and 1. If both scores and states are missing, the
-target is excluded from the analysis.
-
-* while parsing prediction, if scores range is not [0,1] scores are normalized to range [0,1]. This can be done since:
-if states are provided, scores values associated to positive and negative classifications are indicated by the state.
-Default threshold is always inferred from states (see threshold paragraph). This ensures correct default threshold
-normalization even for non uniformly distributed scores.
-if states are not provided: if a threshold is provided states are inferred from scores (see missing scores/states
-paragraph). if a threshold is not provided scores have no clear meaning. They are hence defaulted to probability density
-function (see missing scores/states paragraph).
+generated applying a threshold to scores. The threshold can be passed to parsing function; if it is not passed and 
+states are missing, the threshold defaults to 0.5. If both scores and states are missing, the target is excluded from
+the analysis.
 
 * prediction scores are rounded to the third decimal figure. This sets the number of possible thresholds to 1000. Rounding
 errors are then expected 1/10,000 times: one error each 10,000 labels.
